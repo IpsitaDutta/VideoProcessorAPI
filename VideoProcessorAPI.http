@@ -1,0 +1,6 @@
+@VideoProcessorAPI_HostAddress = http://localhost:5005
+
+GET {{VideoProcessorAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
