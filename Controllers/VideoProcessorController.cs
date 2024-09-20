@@ -32,8 +32,8 @@ namespace VideoProcessorAPI.Controllers
 			_logger = logger;
 		}
 
-		[HttpGet(Name = "GetVideoProcessor")]
-		public async Task<string> Get(string url)
+		[HttpGet("GetVideoProcessor")]
+		public async Task<string> ProcessVideo(string url)
 		{
 			if (url.Length == 0)
 			{
@@ -89,13 +89,6 @@ namespace VideoProcessorAPI.Controllers
 
 				string videoTranscript = transcriptBuilder.ToString();
 
-				string openAIEndpoint = "https://ujguptaazureopenai.openai.azure.com/";
-				string openAIKey = "2038a02e8a4648dc9366f2dc2c327dbc";
-
-				AzureOpenAIClient client = new AzureOpenAIClient(new Uri(openAIEndpoint), new AzureKeyCredential(openAIKey));
-
-				var chatClient = client.GetChatClient("gpt-35-turbo");
-
 				// Prepare the prompt for summarization
 				string prompt = $"Please summarize the following transcript and list key notes and 3 smart tags:\n\n{videoTranscript}\n\n" +
 					 "MAKE SURE TO RETURN the summarize result in JSON format like this:\n" +
@@ -105,20 +98,26 @@ namespace VideoProcessorAPI.Controllers
 					 "  \"SmartTags\":[\"tag1\", \"tag2\"]\n" +
 					 "}";
 
-				// Create a chat message
-				var chatMessage = ChatMessage.CreateUserMessage(prompt);
-
-				// Send the message and get the response
-				var response = await chatClient.CompleteChatAsync(new[] { chatMessage });
-
-				return(response.Value.ToString());
-
-
+				return await GetResultsFromGPT(prompt);
 			}
 			catch (Exception ex)
 			{
 				return($"Error: {ex.Message}");
 			}
+		}
+
+		[HttpGet("GetBlogProcessor")]
+		public async Task<string> ProcessBlog(string htmlContent)
+		{
+			if (htmlContent.Length == 0)
+			{
+				return "Content is null";
+			}
+
+			string prompt = $"I have an HTML snippet that needs improvement. Please enhance it using only inline styles (do not use any external CSS). Here are the specific issues that need to be fixed:\r\nEnsure that content such as HTML is properly detected even when there is a banner or div between different sections.\r\nFix any broken or malformed <img> elements, particularly those that may be lazy-loaded, ensuring the correct image is displayed.\r\nEnsure that headings (<h1>, <h2>, etc.) resemble the styles of the original blog, such as appropriate font sizes, colors, and alignment.\r\nCorrect indentation across the entire document for better readability and consistency.\r\nPrevent images from being oversized; ensure they fit the available space appropriately.\r\nEnsure that images maintain a consistent border radius effect, if one was present in the original design.\r\nPlease generate a new version of the HTML with these improvements applied inline. Here is the HTML snippet {htmlContent}";
+
+			return await GetResultsFromGPT(prompt);
+
 		}
 
 		static YouTubeVideo GetYouTubeVideo(string url)
@@ -175,6 +174,26 @@ namespace VideoProcessorAPI.Controllers
 			using var modelStream = await WhisperGgmlDownloader.GetGgmlModelAsync(ggmlType);
 			using var fileWriter = System.IO.File.OpenWrite(fileName);
 			await modelStream.CopyToAsync(fileWriter);
+		}
+
+		private async Task<string> GetResultsFromGPT(string prompt)
+		{
+			string openAIEndpoint = "https://ujguptaazureopenai.openai.azure.com/";
+			string openAIKey = "2038a02e8a4648dc9366f2dc2c327dbc";
+
+			AzureOpenAIClient client = new AzureOpenAIClient(new Uri(openAIEndpoint), new AzureKeyCredential(openAIKey));
+
+			var chatClient = client.GetChatClient("gpt-35-turbo");
+
+			// Prepare the prompt for summarization
+			
+			// Create a chat message
+			var chatMessage = ChatMessage.CreateUserMessage(prompt);
+
+			// Send the message and get the response
+			var response = await chatClient.CompleteChatAsync(new[] { chatMessage });
+
+			return (response.Value.ToString());
 		}
 	}
 }
