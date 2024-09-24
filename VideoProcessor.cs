@@ -1,13 +1,28 @@
+using Newtonsoft.Json;
+
 namespace VideoProcessorAPI
 {
 	public class VideoProcessor
 	{
-		public DateOnly Date { get; set; }
+		[JsonProperty("KeyNotes")]
+		public Dictionary<string, string> KeyNotes { get; set; }
 
-		public int TemperatureC { get; set; }
+		[JsonProperty("Summary")]
+		public string Summary { get; set; }
 
-		public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+		[JsonProperty("SmartTags")]
+		public List<string> SmartTags { get; set; }
 
-		public string? Summary { get; set; }
+		[JsonProperty("Title")]
+		public string Title { get; set; }
+
+		[JsonProperty("Thumbnail")]
+		public string Thumbnail { get; set; }
+
+		[JsonProperty("Url")]
+		public string Url { get; set; }
+
+		[JsonProperty("Images")]
+		public List<string>? Images { get; set; }
 	}
 }
