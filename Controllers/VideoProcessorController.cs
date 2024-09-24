@@ -17,6 +17,9 @@ using Azure.AI.OpenAI;
 using Azure;
 using OpenAI.Chat;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Newtonsoft.Json.Linq;
+using static MediaToolkit.Model.Metadata;
 
 namespace VideoProcessorAPI.Controllers
 {
@@ -39,64 +42,34 @@ namespace VideoProcessorAPI.Controllers
 			{
 				return ("Url is Null");
 			}
-
-			var video = GetYouTubeVideo(url);
-
-			if (video == null)
-			{
-				return("Invalid YouTube URL or video not found.");
-			}
 			try
 			{
-				var filePath = Path.Combine(Directory.GetCurrentDirectory(), Regex.Replace(video.Title,"[^a-zA-Z]","") + ".mp4");
+				string videoId = ExtractVideoId(url);
 
-				using (var webClient = new WebClient())
+				string videoTranscript = GetTranscript(videoId);
+
+				string videoThumbnail = $"https://img.youtube.com/vi/{videoId}/default.jpg";
+
+				string videoTitle = await GetVideoTitle(videoId);
+
+
+				if ((url == null) && (videoTitle == null) && (videoTranscript == null))
 				{
-					webClient.DownloadFile(video.Uri, filePath);
+					return "Could not extract details from URL provided.";
 				}
-
-				var audioPath = Path.Combine(Directory.GetCurrentDirectory(), Regex.Replace(video.Title, "[^a-zA-Z]", "") + "_audio.wav");
-
-				// convert video to audio
-				ConvertAudioFromVideo(filePath, audioPath, Regex.Replace(video.Title, "[^a-zA-Z]", ""));
-
-				// use model to get the transcript from the audio file.
-
-				var modelFileName = "Test";//@"C:\Users\ipdutta\Downloads\ggml-base.bin";  // update your local path
-				var audioFileName = Path.Combine(Directory.GetCurrentDirectory(), Regex.Replace(video.Title, "[^a-zA-Z]", "") + "16kHz_audio.wav");
-
-				if (!System.IO.File.Exists(modelFileName))
-				{
-					using var modelStream = await WhisperGgmlDownloader.GetGgmlModelAsync(GgmlType.Base);
-					using var fileWriter = System.IO.File.OpenWrite(modelFileName);
-					await modelStream.CopyToAsync(fileWriter);
-				}
-
-				using var whisperFactory = WhisperFactory.FromPath(modelFileName);
-				using var processor = whisperFactory.CreateBuilder()
-					.WithLanguage("auto")
-					.Build();
-
-				using var fileStream = System.IO.File.OpenRead(audioFileName);
-				Console.WriteLine(fileStream.ToString());
-
-				StringBuilder transcriptBuilder = new StringBuilder();
-				await foreach (var result in processor.ProcessAsync(fileStream))
-				{
-					transcriptBuilder.AppendLine($"{result.Start}->{result.End}: {result.Text}");
-					//Console.WriteLine($"{result.Start}->{result.End}:{result.Text}");
-				}
-
-				string videoTranscript = transcriptBuilder.ToString();
 
 				// Prepare the prompt for summarization
-				string prompt = $"Please summarize the following transcript and list key notes and 3 smart tags:\n\n{videoTranscript}\n\n" +
+				string prompt = $"Please summarize the following video from title, link and transcript and list key notes with timestamp and 3 smart tags:\n\n{videoTitle} {url} {videoTranscript}\n\n" +
 					 "MAKE SURE TO RETURN the summarize result in JSON format like this:\n" +
 					 "{\n" +
-					 "  \"KeyNotes\": [\"note1\", \"note2\"],\n" +
+					 "  \"KeyNotes\": [\"timestamp1\":\"note1\", \"timestamp2\":\"note2\"],\n" +
 					 "  \"Summary\": \"your summary here\",\n" +
-					 "  \"SmartTags\":[\"tag1\", \"tag2\"]\n" +
-					 "}";
+					 "  \"SmartTags\":[\"tag1\", \"tag2\"],\n" +
+					 $"  \"Title\":\"{videoTitle}\",\n" +
+					 $"  \"Thumbnail\":\"{videoThumbnail}\"\n" +
+					 $"  \"Url\":\"{url}\"\n" +
+					 "}\n" +
+					 "DO NOT make any changes to the provided Title, Thumbnail and Url";
 
 				return await GetResultsFromGPT(prompt);
 			}
@@ -120,62 +93,6 @@ namespace VideoProcessorAPI.Controllers
 
 		}
 
-		static YouTubeVideo GetYouTubeVideo(string url)
-		{
-			try
-			{
-				var youTube = YouTube.Default;
-				return youTube.GetVideo(url);
-			}
-			catch
-			{
-				return null;
-			}
-		}
-
-		public static void ConvertAudioFromVideo(string inputPath, string outputPath, string title)
-		{
-			var inputFile = new MediaFile { Filename = inputPath };
-			var outputFile = new MediaFile { Filename = outputPath };
-			var conversionOptions = new ConversionOptions
-			{
-				AudioSampleRate = AudioSampleRate.Hz22050
-			};
-			using (var engine = new Engine("C:\\Users\\ipdutta\\Downloads\\bin 1\\bin\\ffmpeg.exe"))
-			{
-				engine.Convert(inputFile, outputFile, conversionOptions);
-			}
-
-			// since the model needs 16kHz sample rate, using NAusdio.wave to sample it at 16kHz
-			// this generate another file, TODO : delete the previously generated file which is sampled at 22050Hz.
-			using (var reader = new WaveFileReader(outputPath))
-			{
-				var outputFormat = new WaveFormat(16000, reader.WaveFormat.Channels);
-
-				using (var resampler = new MediaFoundationResampler(reader, outputFormat))
-				{
-					using (var writer = new WaveFileWriter(Path.Combine(Directory.GetCurrentDirectory(), title + "16kHz_audio.wav"), outputFormat))
-					{
-						byte[] buffer = new byte[1024];
-						int bytesRead;
-						while ((bytesRead = resampler.Read(buffer, 0, buffer.Length)) > 0)
-						{
-							writer.Write(buffer, 0, bytesRead);
-						}
-					}
-				}
-			}
-			Console.WriteLine($"Audio extracted to: {outputPath}");
-		}
-
-		private static async Task DownloadModel(string fileName, GgmlType ggmlType)
-		{
-			Console.WriteLine($"Downloading Model {fileName}");
-			using var modelStream = await WhisperGgmlDownloader.GetGgmlModelAsync(ggmlType);
-			using var fileWriter = System.IO.File.OpenWrite(fileName);
-			await modelStream.CopyToAsync(fileWriter);
-		}
-
 		private async Task<string> GetResultsFromGPT(string prompt)
 		{
 			string openAIEndpoint = "https://ujguptaazureopenai.openai.azure.com/";
@@ -195,5 +112,80 @@ namespace VideoProcessorAPI.Controllers
 
 			return (response.Value.ToString());
 		}
+
+		private string GetTranscript(string videoId)
+		{
+			string pythonScript = Directory.GetCurrentDirectory() + "\\Scripts\\youtubeDownload.py";
+
+			ProcessStartInfo start = new ProcessStartInfo
+			{
+				FileName = "python", // Ensure Python is in your PATH
+				Arguments = $"{pythonScript} {videoId}",
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+				UseShellExecute = false,
+				CreateNoWindow = true
+			};
+
+			using (Process process = new Process())
+			{
+				process.StartInfo = start;
+				process.Start();
+
+				string result = process.StandardOutput.ReadToEnd();
+				string error = process.StandardError.ReadToEnd();
+
+				process.WaitForExit();
+
+				if (!string.IsNullOrEmpty(error))
+				{
+					return null;
+				}
+				else
+				{
+					return("Transcript: " + result);
+				}
+			}
+		}
+
+		private string ExtractVideoId(string url)
+		{
+			var regex = new Regex(@"(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?\/|.*[?&]v=)|youtu\.be\/)([^""&?\/\s]{11}))");
+			var match = regex.Match(url);
+			return match.Success ? match.Groups[1].Value : string.Empty;
+		}
+
+		private async Task<string> GetVideoTitle(string videoId)
+		{
+			string apiKey = "AIzaSyC3ddgdWg8FgVZ42Gsgoj6ItU35L31xuvQ";
+
+			string url = $"https://www.googleapis.com/youtube/v3/videos?id={videoId}&key={apiKey}&part=snippet";
+
+			using (HttpClient client = new HttpClient())
+			{
+				var response = await client.GetAsync(url);
+
+				if (response.IsSuccessStatusCode)
+				{
+					var json = await response.Content.ReadAsStringAsync();
+					var data = JObject.Parse(json);
+
+					// Check if items array is not empty
+					if (data["items"].HasValues)
+					{
+						// Extract the title from the snippet
+						return data["items"][0]["snippet"]["title"].ToString();
+					}
+
+					return null;
+				}
+				else
+				{
+					Console.WriteLine($"Error: {response.StatusCode}");
+					return null;
+				}
+			}
+		}
+
 	}
 }
