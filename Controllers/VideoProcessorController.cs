@@ -19,6 +19,8 @@ using OpenAI.Chat;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
+using YoutubeExplode;
+using YoutubeExplode.Videos.Streams;
 
 namespace VideoProcessorAPI.Controllers
 {
@@ -42,20 +44,27 @@ namespace VideoProcessorAPI.Controllers
 				return ("Url is Null");
 			}
 
-			var video = GetYouTubeVideo(url);
+			//var video = GetYouTubeVideo(url);
 
-			if (video == null)
-			{
-				return ("Invalid YouTube URL or video not found.");
-			}
+			//if (video == null)
+			//{
+			//	return ("Invalid YouTube URL or video not found.");
+			//}
 			try
 			{
+				string videoId = ExtractVideoId(url);
+
+				var youtube = new YoutubeClient();
+				var video = await youtube.Videos.GetAsync(url);
+
+
 				var filePath = Path.Combine(Directory.GetCurrentDirectory(), Regex.Replace(video.Title, "[^a-zA-Z]", "") + ".mp4");
 
-				using (var webClient = new WebClient())
-				{
-					webClient.DownloadFile(video.Uri, filePath);
-				}
+				//using (var webClient = new WebClient())
+				//{
+				//	webClient.DownloadFile(video.Uri, filePath);
+				//}
+				DownloadVideoAsync(videoId, filePath);
 
 				var audioPath = Path.Combine(Directory.GetCurrentDirectory(), Regex.Replace(video.Title, "[^a-zA-Z]", "") + "_audio.wav");
 
@@ -90,8 +99,6 @@ namespace VideoProcessorAPI.Controllers
 
 
 				string videoTranscript = transcriptBuilder.ToString();
-
-				string videoId = ExtractVideoId(url);
 
 				string videoTitle = await GetVideoTitle(videoId);
 
@@ -160,6 +167,22 @@ namespace VideoProcessorAPI.Controllers
 			catch
 			{
 				return null;
+			}
+		}
+
+		public static async Task DownloadVideoAsync(string videoId, string outputPath)
+		{
+			var youtube = new YoutubeClient();
+			var streamManifest = await youtube.Videos.Streams.GetManifestAsync(videoId);
+			var streamInfo = streamManifest.GetMuxedStreams().GetWithHighestVideoQuality();
+			if (streamInfo != null)
+			{
+				await youtube.Videos.Streams.DownloadAsync(streamInfo, outputPath);
+				Console.WriteLine("Video downloaded successfully!");
+			}
+			else
+			{
+				Console.WriteLine("No stream found for the video.");
 			}
 		}
 
